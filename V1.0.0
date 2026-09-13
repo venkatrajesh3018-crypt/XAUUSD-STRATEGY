@@ -1,0 +1,1227 @@
+//@version=6
+strategy(
+     title = "XAUUSD AI Quant Strategy v1.0.0",
+     shorttitle = "XAQ v1",
+     overlay = true,
+     initial_capital = 100000,
+     pyramiding = 0,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.02,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+//====================================================  
+// PROJECT INFORMATION
+//====================================================
+
+// Project Name : XAUUSD AI Quant Strategy
+// Version      : 1.0.0
+// Phase        : Phase 3 - Pine Strategy Development
+// Strategy     : Intraday Trend Continuation
+// Market       : OANDA:XAUUSD
+// Timeframes   : H1 Trend | M5 Execution
+
+//====================================================
+// VERSION HISTORY
+//====================================================
+
+// v1.0.0
+// Initial Project Skeleton
+
+//====================================================
+// INPUTS
+//====================================================
+
+//------------------------------
+// Trend Settings
+//------------------------------
+
+trendTimeframe = input.timeframe("60", "Trend Timeframe")
+emaLength = input.int(200, "EMA Length", minval = 1)
+
+//------------------------------
+// ADX Settings
+//------------------------------
+
+adxLength = input.int(14, "ADX Length", minval = 1)
+adxThreshold = input.float(25.0, "ADX Threshold", step = 0.5)
+
+//------------------------------
+// ATR Settings
+//------------------------------
+
+atrLength = input.int(
+    14,
+    "ATR Length",
+    minval = 1
+)
+
+atrThreshold = input.float(
+    10.0,
+    "ATR Threshold",
+    step = 0.1
+)
+//------------------------------
+// RSI Settings
+//------------------------------
+
+rsiLength = input.int(
+    14,
+    "RSI Length",
+    minval = 1
+)
+
+rsiBullishLevel = input.int(
+    55,
+    "Bullish RSI Level",
+    minval = 1,
+    maxval = 100
+)
+
+rsiBearishLevel = input.int(
+    45,
+    "Bearish RSI Level",
+    minval = 1,
+    maxval = 100
+)
+
+//------------------------------
+// Session Settings
+//------------------------------
+
+tradingSession = input.session(
+    "0800-1700",
+    "Trading Session"
+)
+
+sessionTimeZone = input.string(
+    "Etc/UTC",
+    "Session Time Zone"
+)
+
+//------------------------------
+// Pullback Settings
+//------------------------------
+
+pullbackATRMultiplier = input.float(
+    0.5,
+    "Pullback ATR Multiplier",
+    step = 0.1,
+    minval = 0.1
+)
+
+//------------------------------
+// Market Structure Settings
+//------------------------------
+
+pivotLeft = input.int(
+    3,
+    "Pivot Left Bars",
+    minval = 1
+)
+
+pivotRight = input.int(
+    3,
+    "Pivot Right Bars",
+    minval = 1
+)
+
+//------------------------------
+// Liquidity Settings
+//------------------------------
+
+liquidityLookback = input.int(
+    50,
+    "Liquidity Lookback",
+    minval = 10
+)
+
+//--------------------------------------------------
+// Order Block Settings
+//--------------------------------------------------
+
+orderBlockLookback = input.int(
+    20,
+    "Order Block Lookback",
+    minval = 5
+)
+
+//--------------------------------------------------
+// Fair Value Gap Settings
+//--------------------------------------------------
+
+fvgMinimumSize = input.float(
+    0.30,
+    "Minimum FVG Size",
+    step = 0.05
+)
+//------------------------------
+// Risk Settings
+//------------------------------
+
+stopLossATRMultiplier = input.float(
+    1.5,
+    "Stop Loss ATR Multiplier",
+    step = 0.1,
+    minval = 0.1
+)
+
+riskRewardRatio = input.float(
+    2.0,
+    "Risk Reward Ratio",
+    step = 0.1,
+    minval = 1.0
+)
+
+minimumConfidence = input.int(
+    75,
+    "Minimum AI Confidence",
+    minval = 50,
+    maxval = 100
+)
+
+riskPercent = input.float(
+    1.0,
+    "Risk Per Trade (%)",
+    minval = 0.1,
+    maxval = 5,
+    step = 0.1
+)
+
+breakEvenRR = input.float(
+    1.0,
+    "Break Even Trigger (R)",
+    minval = 0.5,
+    step = 0.1
+)
+
+
+//------------------------------
+// Debug Settings
+//------------------------------
+
+showDebug = input.bool(
+    true,
+    "Show Debug Plots",
+    tooltip = "Enable or disable research plots and debugging visuals."
+)
+
+showDashboard = input.bool(
+    true,
+    "Show Research Dashboard",
+    tooltip = "Displays a live dashboard of strategy conditions."
+)
+
+//====================================================
+// GLOBAL VARIABLES
+//====================================================
+
+//------------------------------
+// Trend Variables
+//------------------------------
+
+//------------------------------
+// Trend Strength Variables
+//------------------------------
+
+//------------------------------
+// Volatility Variables
+//------------------------------
+
+//------------------------------
+// Session Variables
+//------------------------------
+
+//------------------------------
+// Pullback Variables
+//------------------------------
+
+//------------------------------
+// Momentum Variables
+//------------------------------
+
+//------------------------------
+// Entry Variables
+//------------------------------
+
+//------------------------------
+// AI Decision Variables
+//------------------------------
+
+int buyScore = 0
+int sellScore = 0
+
+float buyConfidence = 0.0
+float sellConfidence = 0.0
+
+string aiDecision = ""
+
+//------------------------------
+// Risk Variables
+//------------------------------
+var bool inLongTrade = false
+var bool inShortTrade = false
+//====================================================
+// FUNCTIONS
+//====================================================
+
+// Reusable helper functions will be written here.
+
+//====================================================
+// AI SCORE WEIGHTS
+//====================================================
+
+// Trend
+TREND_SCORE = 25
+
+// Trend Strength
+ADX_SCORE = 20
+
+// Volatility
+ATR_SCORE = 15
+
+// Session
+SESSION_SCORE = 10
+
+// Pullback
+PULLBACK_SCORE = 15
+
+// Market Structure
+STRUCTURE_SCORE = 15
+
+// Liquidity
+LIQUIDITY_SCORE = 20
+
+//Order Block
+ORDERBLOCK_SCORE = 20
+
+//FVG 
+FVG_SCORE = 20
+
+//BOS 
+BOS_SCORE = 25
+
+// Momentum
+RSI_SCORE = 10
+
+//--------------------------------------------------
+// AI Confidence
+//--------------------------------------------------
+
+maxScore =
+     TREND_SCORE +
+     ADX_SCORE +
+     ATR_SCORE +
+     SESSION_SCORE +
+     PULLBACK_SCORE +
+     STRUCTURE_SCORE +
+     LIQUIDITY_SCORE +
+     ORDERBLOCK_SCORE +
+     FVG_SCORE +
+     BOS_SCORE +
+     RSI_SCORE
+
+
+
+//====================================================
+// MODULE 1 - TREND DETECTION
+//====================================================
+
+// Retrieve the EMA from the higher timeframe (H1)
+emaTrend = request.security(
+     syminfo.tickerid,
+     trendTimeframe,
+     ta.ema(close, emaLength)
+)
+
+// Plot the EMA on the chart
+plot(emaTrend, title="H1 EMA", color=color.orange, linewidth=2)
+//====================================================
+// MODULE 2 - TREND STRENGTH
+//====================================================
+
+// Calculate the Directional Movement Index (DMI)
+[plusDI, minusDI, adxValue] = ta.dmi(adxLength, adxLength)
+
+// Check if the trend is strong enough
+trendStrong = adxValue > adxThreshold
+
+// Plot ADX only when Debug Mode is enabled
+plot(
+    showDebug ? adxValue : na,
+    title = "ADX",
+    color = color.blue,
+    linewidth = 2
+)
+//====================================================
+// MODULE 3 - VOLATILITY FILTER
+//====================================================
+
+// Calculate ATR
+atrValue = ta.atr(atrLength)
+
+// Check if volatility is high enough
+volatilityGood = atrValue > atrThreshold
+
+// Plot ATR only when Debug Mode is enabled
+plot(
+    showDebug ? atrValue : na,
+    title = "ATR",
+    color = color.purple,
+    linewidth = 2
+)
+//====================================================
+// MODULE 4 - SESSION FILTER
+//====================================================
+
+// Check if the current bar is inside the selected trading session
+sessionActive = not na(
+    time(
+        timeframe.period,
+        tradingSession,
+        sessionTimeZone
+    )
+)
+
+// Highlight the chart when Debug Mode is enabled
+bgcolor(
+    showDebug and sessionActive
+        ? color.new(color.green, 90)
+        : na
+)
+
+//====================================================
+// MODULE 5 - PULLBACK DETECTION
+//====================================================
+
+// Calculate the distance between price and the EMA
+distanceFromEMA = math.abs(close - emaTrend)
+
+// Maximum acceptable pullback distance
+maxPullbackDistance = atrValue * pullbackATRMultiplier
+
+// Check if price is close enough to the EMA
+pullbackValid = distanceFromEMA <= maxPullbackDistance
+
+//====================================================
+// MODULE 5.5 - MARKET STRUCTURE
+//====================================================
+
+// Detect Pivot Highs
+pivotHigh = ta.pivothigh(
+    high,
+    pivotLeft,
+    pivotRight
+)
+
+// Detect Pivot Lows
+pivotLow = ta.pivotlow(
+    low,
+    pivotLeft,
+    pivotRight
+)
+
+// Store previous confirmed pivots
+var float previousPivotHigh = na
+var float previousPivotLow = na
+
+// Detect Higher High
+higherHigh = not na(pivotHigh) and not na(previousPivotHigh) and pivotHigh > previousPivotHigh
+
+// Detect Higher Low
+higherLow = not na(pivotLow) and not na(previousPivotLow) and pivotLow > previousPivotLow
+
+// Detect Lower High
+lowerHigh = not na(pivotHigh) and not na(previousPivotHigh) and pivotHigh < previousPivotHigh
+
+// Detect Lower Low
+lowerLow = not na(pivotLow) and not na(previousPivotLow) and pivotLow < previousPivotLow
+
+plotshape(
+     showDebug and not na(pivotHigh),
+     title = "Pivot High",
+     style = shape.triangledown,
+     color = color.red,
+     location = location.abovebar,
+     size = size.tiny,
+     offset = -pivotRight
+)
+
+plotshape(
+     showDebug and not na(pivotLow),
+     title = "Pivot Low",
+     style = shape.triangleup,
+     color = color.lime,
+     location = location.belowbar,
+     size = size.tiny,
+     offset = -pivotRight
+)
+
+// Update stored pivot values
+if not na(pivotHigh)
+    previousPivotHigh := pivotHigh
+
+if not na(pivotLow)
+    previousPivotLow := pivotLow
+
+//====================================================
+// Market Structure Debug Labels
+//====================================================
+
+// Higher High Label
+plotshape(
+     showDebug and higherHigh,
+     title = "Higher High",
+     style = shape.labeldown,
+     text = "HH",
+     color = color.red,
+     textcolor = color.white,
+     location = location.abovebar,
+     offset = -pivotRight,
+     size = size.tiny
+)
+
+// Higher Low Label
+plotshape(
+     showDebug and higherLow,
+     title = "Higher Low",
+     style = shape.labelup,
+     text = "HL",
+     color = color.green,
+     textcolor = color.white,
+     location = location.belowbar,
+     offset = -pivotRight,
+     size = size.tiny
+)
+
+// Lower High Label
+plotshape(
+     showDebug and lowerHigh,
+     title = "Lower High",
+     style = shape.labeldown,
+     text = "LH",
+     color = color.orange,
+     textcolor = color.white,
+     location = location.abovebar,
+     offset = -pivotRight,
+     size = size.tiny
+)
+
+// Lower Low Label
+plotshape(
+     showDebug and lowerLow,
+     title = "Lower Low",
+     style = shape.labelup,
+     text = "LL",
+     color = color.blue,
+     textcolor = color.white,
+     location = location.belowbar,
+     offset = -pivotRight,
+     size = size.tiny
+)
+
+//====================================================
+// Structure Direction
+//====================================================
+
+// Overall market structure
+bullishStructure =
+     close > emaTrend and higherHigh
+
+bearishStructure =
+     close < emaTrend and lowerLow
+
+//====================================================
+// MODULE 5.6 - LIQUIDITY ENGINE
+//====================================================
+
+// Store the latest confirmed liquidity levels
+var float latestSwingHigh = na
+var float latestSwingLow = na
+
+// Update when a new pivot is confirmed
+if not na(pivotHigh)
+    latestSwingHigh := pivotHigh
+
+if not na(pivotLow)
+    latestSwingLow := pivotLow
+
+plot(
+    showDebug ? latestSwingHigh : na,
+    title = "Latest Swing High",
+    color = color.red,
+    linewidth = 2,
+    style = plot.style_linebr
+)
+
+plot(
+    showDebug ? latestSwingLow : na,
+    title = "Latest Swing Low",
+    color = color.lime,
+    linewidth = 2,
+    style = plot.style_linebr
+)
+
+//====================================================
+// Liquidity Sweep Detection
+//====================================================
+
+// Bearish Liquidity Sweep
+bearishLiquiditySweep =
+     high > latestSwingHigh and
+     close < latestSwingHigh
+
+// Bullish Liquidity Sweep
+bullishLiquiditySweep =
+     low < latestSwingLow and
+     close > latestSwingLow
+
+plotshape(
+     showDebug and bearishLiquiditySweep,
+     title = "Bearish Sweep",
+     style = shape.flag,
+     location = location.abovebar,
+     color = color.orange,
+     text = "LS",
+     textcolor = color.white,
+     size = size.tiny
+)
+
+plotshape(
+     showDebug and bullishLiquiditySweep,
+     title = "Bullish Sweep",
+     style = shape.flag,
+     location = location.belowbar,
+     color = color.teal,
+     text = "LS",
+     textcolor = color.white,
+     size = size.tiny
+)
+
+//====================================================
+// MODULE 5.7 - ORDER BLOCK ENGINE
+//====================================================
+// Bullish Order Block
+bullishOrderBlock =
+     low == ta.lowest(low, orderBlockLookback)
+
+// Bearish Order Block
+bearishOrderBlock =
+     high == ta.highest(high, orderBlockLookback)
+
+plotshape(
+     showDebug and bullishOrderBlock,
+     title="Bullish OB",
+     style=shape.square,
+     location=location.belowbar,
+     color=color.green,
+     size=size.tiny
+)
+
+plotshape(
+     showDebug and bearishOrderBlock,
+     title="Bearish OB",
+     style=shape.square,
+     location=location.abovebar,
+     color=color.red,
+     size=size.tiny
+)
+
+//====================================================
+// MODULE 5.8 - FAIR VALUE GAP
+//====================================================
+// Bullish Fair Value Gap
+
+bullishFVG = (low > high[2]) and ((low - high[2]) >= fvgMinimumSize)
+
+// Bearish Fair Value Gap
+bearishFVG = (high < low[2]) and ((low[2] - high) >= fvgMinimumSize)
+
+plotshape(
+    showDebug and bullishFVG,
+    title = "Bullish FVG",
+    style = shape.diamond,
+    location = location.belowbar,
+    color = color.lime,
+    size = size.tiny
+)
+
+plotshape(
+    showDebug and bearishFVG,
+    title = "Bearish FVG",
+    style = shape.diamond,
+    location = location.abovebar,
+    color = color.red,
+    size = size.tiny
+)
+
+//====================================================
+// MODULE 5.9 - BREAK OF STRUCTURE
+//====================================================
+// Bullish Break of Structure
+bullishBOS = not na(previousPivotHigh) and close > previousPivotHigh
+
+// Bearish Break of Structure
+bearishBOS = not na(previousPivotLow) and close < previousPivotLow
+
+plotshape(
+    showDebug and bullishBOS,
+    title="Bullish BOS",
+    style=shape.labelup,
+    location=location.belowbar,
+    color=color.green,
+    text="BOS",
+    textcolor=color.white,
+    size=size.tiny
+)
+
+plotshape(
+    showDebug and bearishBOS,
+    title="Bearish BOS",
+    style=shape.labeldown,
+    location=location.abovebar,
+    color=color.red,
+    text="BOS",
+    textcolor=color.white,
+    size=size.tiny
+)
+
+//====================================================
+// MARKET FILTER SUMMARY
+//====================================================
+
+// Check if all market filters pass
+marketConditionsGood =
+     trendStrong and
+     volatilityGood and
+     sessionActive and
+     pullbackValid
+
+plotchar(trendStrong,        "Trend",      "T", location.top)
+plotchar(volatilityGood,     "ATR",        "A", location.top)
+plotchar(sessionActive,      "Session",    "S", location.top)
+plotchar(pullbackValid,      "Pullback",   "P", location.top)
+
+plotchar(bullishStructure,   "Structure",  "H", location.top)
+plotchar(bullishBOS,         "BOS",        "B", location.top)
+plotchar(bullishOrderBlock,  "OB",         "O", location.top)
+plotchar(bullishFVG,         "FVG",        "F", location.top)
+plotchar(bullishLiquiditySweep,"LS","L",location.top)
+
+//====================================================
+// MARKET SCORE ENGINE
+//====================================================
+
+// Start at zero
+marketScore = 0
+
+// Trend
+marketScore += trendStrong ? 1 : 0
+
+// Volatility
+marketScore += volatilityGood ? 1 : 0
+
+// Session
+marketScore += sessionActive ? 1 : 0
+
+// Pullback
+marketScore += pullbackValid ? 1 : 0
+//====================================================
+// AI DECISION ENGINE
+//====================================================
+
+// Reset the score every candle
+buyScore := 0    
+
+sellScore := 0
+
+//--------------------------------------------------
+// Trend
+//--------------------------------------------------
+
+if close > emaTrend
+    buyScore += TREND_SCORE
+else
+    sellScore += TREND_SCORE
+
+//--------------------------------------------------
+// ADX
+//--------------------------------------------------
+
+if trendStrong
+    if close > emaTrend
+        buyScore += ADX_SCORE
+    else
+        sellScore += ADX_SCORE
+//--------------------------------------------------
+// ATR
+//--------------------------------------------------
+
+if volatilityGood
+    if close > emaTrend
+        buyScore += ATR_SCORE
+    else
+        sellScore += ATR_SCORE
+
+//--------------------------------------------------
+// Session
+//--------------------------------------------------
+
+if sessionActive
+    if close > emaTrend
+        buyScore += SESSION_SCORE
+    else
+        sellScore += SESSION_SCORE
+
+//--------------------------------------------------
+// Pullback
+//--------------------------------------------------
+
+if pullbackValid
+    if close > emaTrend
+        buyScore += PULLBACK_SCORE
+    else
+        sellScore += PULLBACK_SCORE
+//--------------------------------------------------
+// Market Structure
+//--------------------------------------------------
+
+if bullishStructure
+    buyScore += STRUCTURE_SCORE
+
+if bearishStructure
+    sellScore += STRUCTURE_SCORE
+
+//--------------------------------------------------
+// Liquidity
+//--------------------------------------------------
+
+if bullishLiquiditySweep
+    buyScore += LIQUIDITY_SCORE
+
+if bearishLiquiditySweep
+    sellScore += LIQUIDITY_SCORE
+
+//--------------------------------------------------
+// Order Blocks
+//--------------------------------------------------
+
+if bullishOrderBlock
+    buyScore += ORDERBLOCK_SCORE
+
+if bearishOrderBlock
+    sellScore += ORDERBLOCK_SCORE
+
+//--------------------------------------------------
+// Fair Value Gap
+//--------------------------------------------------
+
+if bullishFVG
+    buyScore += FVG_SCORE
+
+if bearishFVG
+    sellScore += FVG_SCORE
+
+//--------------------------------------------------
+// Break Of Structure
+//--------------------------------------------------
+
+if bullishBOS
+    buyScore += BOS_SCORE
+
+if bearishBOS
+    sellScore += BOS_SCORE
+//====================================================
+// MODULE 6 - MOMENTUM CONFIRMATION
+//====================================================
+// RSI logic
+
+// Calculate RSI
+rsiValue = ta.rsi(close, rsiLength)
+
+// Momentum conditions
+bullishMomentum = rsiValue > rsiBullishLevel
+bearishMomentum = rsiValue < rsiBearishLevel
+
+// Add momentum score
+if bullishMomentum
+    buyScore += RSI_SCORE
+
+if bearishMomentum
+    sellScore += RSI_SCORE
+
+//====================================================
+// AI CONFIDENCE ENGINE
+//====================================================
+
+totalScore = buyScore + sellScore
+
+buyConfidence := totalScore > 0 ? math.round((buyScore / totalScore) * 100) : 0
+
+sellConfidence := totalScore > 0 ? math.round((sellScore / totalScore) * 100) : 0
+
+if buyConfidence >= 90
+    aiDecision := "★★★★★ ELITE BUY"
+else if buyConfidence >= 75
+    aiDecision := "★★★★ VERY STRONG BUY"
+else if buyConfidence >= 60
+    aiDecision := "★★★ STRONG BUY"
+else if sellConfidence >= 90
+    aiDecision := "★★★★★ ELITE SELL"
+else if sellConfidence >= 75
+    aiDecision := "★★★★ VERY STRONG SELL"
+else if sellConfidence >= 60
+    aiDecision := "★★★ STRONG SELL"
+else
+    aiDecision := "NO TRADE"
+
+// Debug plot
+plot(
+    showDebug ? rsiValue : na,
+    title = "RSI",
+    color = color.aqua,
+    linewidth = 2
+)
+buyApproved = buyConfidence >= minimumConfidence
+
+sellApproved = sellConfidence >= minimumConfidence
+
+plotchar(bullishMomentum,    "RSI",        "R", location.top)
+
+plotchar(buyApproved,        "AI",         "C", location.top)
+
+//====================================================
+// MODULE 7 - ENTRY CONFIRMATION
+//====================================================
+
+// Candle Break Confirmation
+
+// Check if the current candle is bullish
+bullishCandle = close > open
+
+// Final buy setup
+//====================================================
+// SMART MONEY SCORE
+//====================================================
+
+smartMoneyScore = 0
+
+smartMoneyScore += bullishBOS ? 1 : 0
+smartMoneyScore += bullishOrderBlock ? 1 : 0
+smartMoneyScore += bullishFVG ? 1 : 0
+smartMoneyScore += bullishLiquiditySweep ? 1 : 0
+
+//====================================================
+// BUY SETUP
+//====================================================
+
+buySetup =
+     buyApproved and
+     bullishMomentum and
+     bullishCandle
+     
+
+buyConditions = 0
+
+plotchar(buySetup, title="BUY", char="B", location=location.bottom, color=color.lime)
+
+buyConditions += buyApproved ? 1 : 0
+buyConditions += marketConditionsGood ? 1 : 0
+buyConditions += bullishMomentum ? 1 : 0
+buyConditions += bullishStructure ? 1 : 0
+buyConditions += bullishBOS ? 1 : 0
+buyConditions += bullishOrderBlock ? 1 : 0
+buyConditions += bullishFVG ? 1 : 0
+buyConditions += bullishLiquiditySweep ? 1 : 0
+buyConditions += bullishCandle ? 1 : 0
+
+plot(buyConditions, title="Buy Conditions")
+plot(smartMoneyScore, title="SMC Score")
+plot(buyConfidence, title="Confidence")
+
+// Check if the current candle is bearish
+bearishCandle = close < open
+
+// Final sell setup
+smartMoneyScoreSell = 0
+
+smartMoneyScoreSell += bearishBOS ? 1 : 0
+smartMoneyScoreSell += bearishOrderBlock ? 1 : 0
+smartMoneyScoreSell += bearishFVG ? 1 : 0
+smartMoneyScoreSell += bearishLiquiditySweep ? 1 : 0
+
+sellSetup =
+     sellApproved and
+     bearishMomentum and
+     bearishCandle
+
+plotchar(sellSetup, title="SELL", char="S", location=location.bottom, color=color.red)
+
+plotchar(buySetup, "BUY SETUP", "B", location.top)
+plotchar(sellSetup, "SELL SETUP", "S", location.top) 
+plot(sellConfidence, title="Sell Confidence")
+plot(sellConfidence, title="Sell Confidence")
+plot(smartMoneyScore, title="SMC Buy Score")
+plot(smartMoneyScoreSell, title="SMC Sell Score")
+
+//====================================================
+// MODULE 8 - RISK MANAGEMENT
+//====================================================
+
+// Position Size
+// Stop Loss
+// Take Profit
+
+// Calculate stop loss distance using ATR
+stopLossDistance = atrValue * stopLossATRMultiplier
+
+// Calculate take profit distance
+takeProfitDistance = stopLossDistance * riskRewardRatio
+
+// Calculate BUY stop loss price
+buyStopLoss = close - stopLossDistance
+
+// Calculate BUY take profit price
+buyTakeProfit = close + takeProfitDistance
+
+// Calculate sell stop loss price
+sellStopLoss = close + stopLossDistance
+
+// Calculate sell take profit price
+sellTakeProfit = close - takeProfitDistance
+
+noOpenPosition = strategy.position_size == 0
+
+accountRisk = strategy.equity * riskPercent / 100
+
+positionSize = accountRisk / stopLossDistance
+
+positionSize := math.max(positionSize, 0)
+
+buyBreakEvenTrigger = strategy.position_avg_price +
+     stopLossDistance * breakEvenRR
+
+sellBreakEvenTrigger =
+     strategy.position_avg_price -
+     stopLossDistance * breakEvenRR
+
+buyBreakEven =
+     strategy.position_size > 0 and
+     high >= buyBreakEvenTrigger
+
+sellBreakEven =
+     strategy.position_size < 0 and
+     low <= sellBreakEvenTrigger
+
+longStop =
+     buyBreakEven ?
+     strategy.position_avg_price :
+     buyStopLoss
+
+shortStop =
+     sellBreakEven ?
+     strategy.position_avg_price :
+     sellStopLoss
+
+
+//====================================================
+// FRESH ENTRY SIGNALS
+//====================================================
+
+// Signal only on the first candle
+newBuySignal = buySetup and not buySetup[1]
+newSellSignal = sellSetup and not sellSetup[1]
+//====================================================
+// STRATEGY EXECUTION
+//====================================================
+
+// Entry Orders
+
+// Exit Orders
+
+//====================================================
+// STRATEGY EXECUTION
+//====================================================
+
+// Enter a BUY trade
+if newBuySignal and noOpenPosition
+    strategy.entry(
+        "Long",
+        strategy.long,
+        qty = positionSize
+    )
+
+// Enter a SELL trade
+if newSellSignal and noOpenPosition
+    strategy.entry(
+        "Short",
+        strategy.short,
+        qty = positionSize
+    )
+    
+plotshape(
+    buySetup,
+    title="BUY Signal",
+    style=shape.arrowup,
+    location=location.belowbar,
+    color=color.lime,
+    size=size.small,
+    text="BUY"
+)
+
+plotshape(
+    sellSetup,
+    title="SELL Signal",
+    style=shape.arrowdown,
+    location=location.abovebar,
+    color=color.red,
+    size=size.small,
+    text="SELL"
+)
+
+// Exit the BUY trade
+strategy.exit(
+    "Long Exit",
+    from_entry = "Long",
+    stop = longStop,
+    limit = buyTakeProfit
+)
+// Exit the sell trade
+strategy.exit(
+     "Short Exit",
+     from_entry = "Short",
+     stop = shortStop,
+     limit = sellTakeProfit
+)
+
+inLongTrade :=
+     strategy.position_size > 0
+
+inShortTrade :=
+     strategy.position_size < 0
+//====================================================
+// DEBUG PANEL
+//====================================================
+
+
+///====================================================
+// Research Dashboard
+//====================================================
+
+// Dashboard Label
+var label dashboard = na
+
+if showDashboard
+
+    // Delete previous label
+    if not na(dashboard)
+        label.delete(dashboard)
+
+    // Determine RSI Status
+    rsiStatus = bullishMomentum ? "Bullish" : bearishMomentum ? "Bearish" : "Neutral"
+
+    // Create Dashboard
+    dashboard := label.new(
+     x = bar_index + 5,
+     y = high + atrValue * 2,
+     text =
+     "AI RESEARCH\n\n" +
+     "BUY SCORE : " + str.tostring(buyScore) +
+     "\nSELL SCORE : " + str.tostring(sellScore) +
+     "\nBUY CONF : " + str.tostring(math.round(buyConfidence)) + "%" +
+     "\nSELL CONF : " + str.tostring(math.round(sellConfidence)) + "%" +
+     "\nAI : " + aiDecision +
+     "\n\nTrend : " + (trendStrong ? "Strong" : "Weak") +
+     "\nATR : " + (volatilityGood ? "High" : "Low") +
+     "\nSession : " + (sessionActive ? "ON" : "OFF") +
+     "\nPullback : " + (pullbackValid ? "YES" : "NO") +
+     "\nStructure : " +
+     (bullishStructure ? "Bullish" :
+      bearishStructure ? "Bearish" :
+      "Neutral") +
+     "\nRSI : " +
+     (bullishMomentum ? "Bullish" :
+      bearishMomentum ? "Bearish" :
+      "Neutral") +
+     "\nBOS : " +
+     (bullishBOS ? "Bullish" :
+      bearishBOS ? "Bearish" :
+      "None") +
+     "\nTrade : " +
+     (inLongTrade ? "LONG" :
+      inShortTrade ? "SHORT" :
+      "FLAT"),
+     style = label.style_label_left,
+     color = buyConfidence >= sellConfidence ? color.new(color.green, 20) : color.new(color.red, 20),
+     textcolor = color.white,
+     size = size.normal
+)
+//-------------------------------------
+// Labels
+//-------------------------------------
+
+//-------------------------------------
+// Shapes
+//-------------------------------------
+
+//-------------------------------------
+// Background Colors
+//-------------------------------------
+
+//-------------------------------------
+// Tables
+//-------------------------------------
+
+//-------------------------------------
+// Alerts (Later)
+//-------------------------------------
+
+//====================================================
+// END OF STRATEGY
+//====================================================
+
+//====================================================
+// DEBUG TABLE
+//====================================================
+
+var table debugTable = table.new(position.top_right, 2, 13, border_width=1)
+
+if barstate.islast
+    table.cell(debugTable, 0, 0, "Condition", bgcolor=color.black, text_color=color.white)
+    table.cell(debugTable, 1, 0, "Status", bgcolor=color.black, text_color=color.white)
+
+    table.cell(debugTable, 0, 1, "Trend")
+    table.cell(debugTable, 1, 1, trendStrong ? "✅" : "❌", text_color=trendStrong ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 2, "ATR")
+    table.cell(debugTable, 1, 2, volatilityGood ? "✅" : "❌", text_color=volatilityGood ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 3, "Session")
+    table.cell(debugTable, 1, 3, sessionActive ? "✅" : "❌", text_color=sessionActive ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 4, "Pullback")
+    table.cell(debugTable, 1, 4, pullbackValid ? "✅" : "❌", text_color=pullbackValid ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 5, "Structure")
+    table.cell(debugTable, 1, 5, bullishStructure ? "✅" : "❌", text_color=bullishStructure ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 6, "BOS")
+    table.cell(debugTable, 1, 6, bullishBOS ? "✅" : "❌", text_color=bullishBOS ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 7, "Order Block")
+    table.cell(debugTable, 1, 7, bullishOrderBlock ? "✅" : "❌", text_color=bullishOrderBlock ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 8, "FVG")
+    table.cell(debugTable, 1, 8, bullishFVG ? "✅" : "❌", text_color=bullishFVG ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 9, "Liquidity")
+    table.cell(debugTable, 1, 9, bullishLiquiditySweep ? "✅" : "❌", text_color=bullishLiquiditySweep ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 10, "RSI")
+    table.cell(debugTable, 1, 10, bullishMomentum ? "✅" : "❌", text_color=bullishMomentum ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 11, "AI")
+    table.cell(debugTable, 1, 11, buyApproved ? "✅" : "❌", text_color=buyApproved ? color.lime : color.red)
+
+    table.cell(debugTable, 0, 12, "BUY SETUP")
+    table.cell(debugTable, 1, 12, buySetup ? "🚀" : "❌", text_color=buySetup ? color.lime : color.red)
